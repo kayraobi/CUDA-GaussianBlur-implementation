@@ -41,12 +41,13 @@ __global__ void gaussian_filter(unsigned char *input, unsigned char *output, int
     output[idx] = sum / weight;
 }
 
-__global__ void vector_addition(double *a, double *b, double *c)
+__global__ void vector_addition(const unsigned char *a, const unsigned char *b, unsigned char *out, int size)
 {
-
     int id = blockIdx.x * blockDim.x + threadIdx.x;
-    c[id] = a[id]+b[id];  //to-do we will combine original+gaussian apllied images to provide softer gaussian
+    if (id < size)
+        out[id] = min((int)a[id] + (int)b[id], 255);  // saturate to avoid overflow
 }
+
 
 int main()
 {
@@ -62,13 +63,17 @@ int main()
     int size = width * height;
 
     unsigned char *image_1d = new unsigned char[size];
+    unsigned char *output_image = new unsigned char[size];
+
     for (int y = 0; y < height; y++)
         for (int x = 0; x < width; x++)
             image_1d[y * width + x] = image.at<uchar>(y, x);
 
-    unsigned char *d_input, *d_output, *output_image = new unsigned char[size];
+    unsigned char *d_input, *d_output, *d_result;
     cudaMalloc(&d_input, size * sizeof(unsigned char));
     cudaMalloc(&d_output, size * sizeof(unsigned char));
+    cudaMalloc(&d_result, size * sizeof(unsigned char)); 
+
     cudaMemcpy(d_input, image_1d, size * sizeof(unsigned char), cudaMemcpyHostToDevice);
 
     dim3 blockSize(16, 16);
@@ -76,9 +81,12 @@ int main()
     gaussian_filter<<<gridSize, blockSize>>>(d_input, d_output, width, height);
     cudaDeviceSynchronize();
 
-    cudaMemcpy(output_image, d_output, size * sizeof(unsigned char), cudaMemcpyDeviceToHost);
+    int blockSize1D = 256;
+    int gridSize1D = (size + blockSize1D - 1) / blockSize1D;
+    vector_addition<<<gridSize1D, blockSize1D>>>(d_input, d_output, d_result, size);
+    cudaDeviceSynchronize();
 
-
+    cudaMemcpy(output_image, d_result, size * sizeof(unsigned char), cudaMemcpyDeviceToHost);
 
     cv::Mat output_mat(height, width, CV_8UC1);
     for (int y = 0; y < height; ++y)
@@ -87,23 +95,22 @@ int main()
 
     cv::Mat diff_raw, diff;
     cv::absdiff(image, output_mat, diff_raw);
-    cv::convertScaleAbs(diff_raw, diff, 5.0);
+    cv::convertScaleAbs(diff_raw, diff, 2.0);
 
     cv::Mat combined;
     cv::hconcat(std::vector<cv::Mat>{image, output_mat, diff}, combined);
 
-    cv::imshow("Original | Blurred | Difference (x5 contrast)", combined);
-
+    cv::imshow("Original | Blurred+Original | Difference (x5 contrast)", combined);
     cv::imwrite("blurred_output.jpg", output_mat);
     cv::imwrite("difference_output.jpg", diff);
     cv::imwrite("combined_output.jpg", combined);
-
     cv::waitKey(0);
 
     delete[] image_1d;
     delete[] output_image;
     cudaFree(d_input);
     cudaFree(d_output);
+    cudaFree(d_result);
 
     return 0;
 }
