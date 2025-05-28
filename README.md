@@ -82,7 +82,7 @@ Using shared memory greatly reduces the latency of reading pixel neighborhoods c
 
 ## 📊 Performance
 
-By using shared memory, this implementation significantly outperforms a naive global-memory-only version, especially on large images. Benchmark results are provided in the `benchmark_results.md` file.
+By using shared memory, this implementation significantly outperforms a naive global-memory-only version, especially on large images.
 
 ---
 
